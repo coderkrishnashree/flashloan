@@ -1,0 +1,21 @@
+{
+  "name": "hardhat-project",
+  "dependencies": {
+    "@aave/protocol-v2": "^1.0.1",
+    "@balancer-labs/v2-interfaces": "^0.4.0",
+    "@openzeppelin/contracts": "^5.3.0",
+    "@uniswap/v3-core": "^1.0.1",
+    "@uniswap/v3-periphery": "^1.4.4",
+    "dotenv": "^16.5.0",
+    "ethers": "^5.7.2",
+    "hardhat": "^2.24.0",
+    "node-telegram-bot-api": "^0.66.0"
+  },
+  "scripts": {
+  "test": "hardhat test",
+  "deploy:mumbai": "hardhat run scripts/deploy.js --network mumbai",
+  "deploy:polygon": "hardhat run scripts/deploy.js --network polygon",
+  "verify:polygon": "hardhat verify --network polygon",
+  "monitor": "node src/monitor.js"
+}
+}
