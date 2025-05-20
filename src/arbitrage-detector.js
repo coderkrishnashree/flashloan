@@ -8,43 +8,61 @@ class ArbitrageDetector {
     this.walletKey = process.env.PRIVATE_KEY;
     this.wallet = new ethers.Wallet(this.walletKey, this.provider);
     
-    this.quickswapRouter = "0xa5E0829CaCEd8fFDD4De3c43696c57F7D7A678ff"; // QuickSwap on Polygon
-this.sushiswapRouter = "0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506"; // SushiSwap on Polygon
-
+    // Get router addresses from .env
+    this.quickswapRouter = process.env.QUICKSWAP_ROUTER;
+    this.sushiswapRouter = process.env.SUSHISWAP_ROUTER;
     
     // ABI for router interaction
     this.routerAbi = [
       "function getAmountsOut(uint amountIn, address[] memory path) public view returns (uint[] memory amounts)"
     ];
     
-    // Create contract instances
-    this.uniswapContract = new ethers.Contract(this.uniswapRouter, this.routerAbi, this.provider);
+    // Create contract instances - fix the inconsistency here
+    this.quickswapContract = new ethers.Contract(this.quickswapRouter, this.routerAbi, this.provider);
     this.sushiswapContract = new ethers.Contract(this.sushiswapRouter, this.routerAbi, this.provider);
     
-    // Token list to monitor
-    this.tokenPairs = [
-        {
-          token0: "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270", // WMATIC (Wrapped MATIC)
-          token1: "0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063", // DAI on Polygon
-          name: "WMATIC/DAI"
-        },
-        {
-          token0: "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270", // WMATIC
-          token1: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174", // USDC on Polygon
-          name: "WMATIC/USDC"
-        }
-      ];
+    // Parse token pairs from environment variables
+    this.tokenPairs = this.parseTokenPairs();
+    
+    // Get threshold from env with fallback
+    this.priceDiffThreshold = parseFloat(process.env.PRICE_DIFFERENCE_THRESHOLD || "0.5");
+    this.monitorInterval = parseInt(process.env.MONITOR_INTERVAL_MS || "10000");
+  }
+  
+  parseTokenPairs() {
+    // Parse TOKEN_PAIRS and TOKEN_PAIR_NAMES from .env
+    const tokenPairAddresses = (process.env.TOKEN_PAIRS || "").split(',');
+    const tokenPairNames = (process.env.TOKEN_PAIR_NAMES || "").split(',');
+    
+    const pairs = [];
+    
+    for (let i = 0; i < tokenPairAddresses.length; i++) {
+      if (!tokenPairAddresses[i]) continue;
+      
+      const [token0, token1] = tokenPairAddresses[i].split(':');
+      
+      if (token0 && token1) {
+        pairs.push({
+          token0: token0,
+          token1: token1,
+          name: (i < tokenPairNames.length) ? tokenPairNames[i] : `Pair ${i+1}`
+        });
+      }
+    }
+    
+    return pairs;
   }
   
   async monitorOpportunities() {
     console.log("Starting arbitrage opportunity detection...");
+    console.log(`Monitoring ${this.tokenPairs.length} token pairs with ${this.priceDiffThreshold}% threshold`);
     
     // Monitor prices at regular intervals
     setInterval(async () => {
       for (const pair of this.tokenPairs) {
         await this.checkArbitrageOpportunity(pair);
       }
-    }, 10000);
+    }, this.monitorInterval);
   }
   
   async checkArbitrageOpportunity(pair) {
@@ -52,9 +70,9 @@ this.sushiswapRouter = "0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506"; // SushiSwa
       const amountIn = ethers.utils.parseEther("1"); // 1 token
       const path = [pair.token0, pair.token1];
       
-      // Get Uniswap price
-      const uniswapAmounts = await this.uniswapContract.getAmountsOut(amountIn, path);
-      const uniswapPrice = uniswapAmounts[1];
+      // Get QuickSwap price
+      const quickswapAmounts = await this.quickswapContract.getAmountsOut(amountIn, path);
+      const quickswapPrice = quickswapAmounts[1];
       
       // Get Sushiswap price
       const sushiswapAmounts = await this.sushiswapContract.getAmountsOut(amountIn, path);
@@ -62,25 +80,25 @@ this.sushiswapRouter = "0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506"; // SushiSwa
       
       // Calculate price difference
       const priceDiff = Math.abs(
-        (parseFloat(ethers.utils.formatUnits(uniswapPrice, 18)) / 
+        (parseFloat(ethers.utils.formatUnits(quickswapPrice, 18)) / 
          parseFloat(ethers.utils.formatUnits(sushiswapPrice, 18)) - 1) * 100
       );
       
       console.log(`${pair.name} price difference: ${priceDiff.toFixed(4)}%`);
       
       // If significant price difference found
-      if (priceDiff > 0.5) { // More than 0.5% difference
+      if (priceDiff > this.priceDiffThreshold) {
         console.log(`Potential arbitrage opportunity found for ${pair.name}!`);
         
         // Calculate optimal trade path
-        let buyOnUniswap = parseFloat(ethers.utils.formatUnits(uniswapPrice, 18)) < 
+        let buyOnQuickswap = parseFloat(ethers.utils.formatUnits(quickswapPrice, 18)) < 
                            parseFloat(ethers.utils.formatUnits(sushiswapPrice, 18));
         
         // Find optimal loan amount
         const optimalAmount = await this.calculateOptimalTradeSize(
           pair.token0,
           pair.token1,
-          buyOnUniswap
+          buyOnQuickswap
         );
         
         // Execute if profitable
@@ -89,7 +107,7 @@ this.sushiswapRouter = "0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506"; // SushiSwa
             pair.token0,
             optimalAmount,
             pair.token1,
-            buyOnUniswap
+            buyOnQuickswap
           );
         }
       }
@@ -98,15 +116,46 @@ this.sushiswapRouter = "0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506"; // SushiSwa
     }
   }
   
-  async calculateOptimalTradeSize(token0, token1, buyOnUniswap) {
-    // In a real application, this would use a mathematical model
-    // to find the optimal trade size considering slippage and gas costs
-    
-    // For learning purposes, we'll use a fixed amount
-    return ethers.utils.parseEther("10"); // 10 ETH worth
+  async calculateOptimalTradeSize(token0, token1, buyOnQuickswap) {
+    try {
+      // Get token information for correct decimal handling
+      const tokenContract = new ethers.Contract(
+        token0,
+        ["function decimals() view returns (uint8)"],
+        this.provider
+      );
+      
+      // Try to get decimals, fallback to 18 if it fails
+      let decimals = 18;
+      try {
+        decimals = await tokenContract.decimals();
+      } catch (e) {
+        console.warn(`Could not get decimals for ${token0}, using default of 18`);
+      }
+      
+      // Calculate gas costs for this transaction (estimate)
+      const gasPrice = await this.provider.getGasPrice();
+      const gasCost = gasPrice.mul(3000000); // Estimated gas limit
+      const gasCostInEth = parseFloat(ethers.utils.formatEther(gasCost));
+      
+      // Minimum profit threshold from .env (convert to ETH)
+      const minProfitThreshold = parseFloat(process.env.MIN_PROFIT_THRESHOLD || "0.01");
+      
+      // Add safety margin to ensure profit covers gas
+      const targetProfit = minProfitThreshold + gasCostInEth;
+      
+      // In a real system, we would test different loan sizes here
+      // For now, use a simple approach based on the target profit
+      
+      // Start with a moderate amount 
+      return ethers.utils.parseUnits("10", decimals);
+    } catch (error) {
+      console.error("Error calculating optimal trade size:", error.message);
+      return ethers.constants.Zero;
+    }
   }
   
-  async executeArbitrage(token0, amount, token1, buyOnUniswap) {
+  async executeArbitrage(token0, amount, token1, buyOnQuickswap) {
     try {
       // Prepare path data
       const path = [token0, token1];
@@ -115,10 +164,12 @@ this.sushiswapRouter = "0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506"; // SushiSwa
       const strategyData = ethers.utils.defaultAbiCoder.encode(
         ["uint8", "address[]", "uint256[]", "address[]"],
         [
-          1, // Strategy type 1: simple Uni/Sushi arbitrage
+          1, // Strategy type 1: simple QuickSwap/Sushi arbitrage
           path,
           [0, 0], // Min amounts out (would calculate proper values in production)
-          [this.uniswapRouter, this.sushiswapRouter]
+          buyOnQuickswap ? 
+            [this.quickswapRouter, this.sushiswapRouter] : 
+            [this.sushiswapRouter, this.quickswapRouter]
         ]
       );
       
@@ -135,7 +186,7 @@ this.sushiswapRouter = "0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506"; // SushiSwa
       );
       
       // Execute transaction
-      console.log(`Executing arbitrage with ${ethers.utils.formatEther(amount)} ETH...`);
+      console.log(`Executing arbitrage with ${ethers.utils.formatEther(amount)} tokens...`);
       
       const tx = await advancedBot.executeArbitrage(
         token0,

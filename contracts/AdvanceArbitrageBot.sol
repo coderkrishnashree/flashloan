@@ -219,6 +219,73 @@ contract AdvancedArbitrageBot is FlashLoanReceiverBase, Ownable, ReentrancyGuard
     function setAuthorizedCaller(address _caller, bool _status) external onlyOwner {
         authorizedCallers[_caller] = _status;
     }
+
+    // Multi-DEX strategy that splits trades across different exchanges
+function _executeMultiDexStrategy(
+    address tokenIn,
+    uint256 amountIn,
+    address[] memory path,
+    address[] memory routers,
+    uint256[] memory minAmountsOut
+) internal {
+    require(path.length >= 3, "Path too short for multi-dex strategy");
+    require(routers.length >= 2, "Not enough routers provided");
+    
+    // Calculate optimal split for the first trade
+    // For simplicity, we'll use a 70/30 split, but in production,
+    // you would calculate this based on liquidity depths
+    uint256 firstPortionAmount = amountIn * 70 / 100;
+    uint256 secondPortionAmount = amountIn - firstPortionAmount;
+    
+    // Create sub-paths
+    address[] memory firstHopPath = new address[](2);
+    firstHopPath[0] = path[0];
+    firstHopPath[1] = path[1];
+    
+    address[] memory secondHopPath = new address[](2);
+    secondHopPath[0] = path[1]; 
+    secondHopPath[1] = path[2];
+    
+    // Approve first router
+    IERC20(tokenIn).approve(routers[0], firstPortionAmount);
+    
+    // Execute first part of trade on first router
+    IUniswapV2Router(routers[0]).swapExactTokensForTokens(
+        firstPortionAmount,
+        minAmountsOut[0],
+        firstHopPath,
+        address(this),
+        block.timestamp + 300
+    );
+    
+    // Approve second router
+    IERC20(tokenIn).approve(routers[1], secondPortionAmount);
+    
+    // Execute second part of trade on second router
+    IUniswapV2Router(routers[1]).swapExactTokensForTokens(
+        secondPortionAmount,
+        minAmountsOut[1],
+        firstHopPath,
+        address(this),
+        block.timestamp + 300
+    );
+    
+    // Get intermediate token balance
+    address intermediateToken = path[1];
+    uint256 intermediateAmount = IERC20(intermediateToken).balanceOf(address(this));
+    
+    // Approve for final swap (use the first router for simplicity)
+    IERC20(intermediateToken).approve(routers[0], intermediateAmount);
+    
+    // Execute final swap back to original token
+    IUniswapV2Router(routers[0]).swapExactTokensForTokens(
+        intermediateAmount,
+        minAmountsOut[2],
+        secondHopPath,
+        address(this),
+        block.timestamp + 300
+    );
+}
     
     // Function to receive ETH
     receive() external payable {}

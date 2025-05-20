@@ -5,6 +5,9 @@ class MevProtection {
   constructor(provider, privateKey) {
     this.provider = provider;
     this.wallet = new ethers.Wallet(privateKey, provider);
+    
+    // Get gas price multiplier from env or use default
+    this.priorityMultiplier = parseFloat(process.env.GAS_PRICE_MULTIPLIER || "1.2");
   }
   
   async calculateOptimalGasPrice() {
@@ -12,9 +15,8 @@ class MevProtection {
       // Get current gas price
       const baseGasPrice = await this.provider.getGasPrice();
       
-      // Add a premium to have higher priority (1.2x the base gas price)
-      const priorityMultiplier = 1.2;
-      const optimalGasPrice = baseGasPrice.mul(Math.floor(priorityMultiplier * 100)).div(100);
+      // Add a premium to have higher priority (using multiplier from env)
+      const optimalGasPrice = baseGasPrice.mul(Math.floor(this.priorityMultiplier * 100)).div(100);
       
       return optimalGasPrice;
     } catch (error) {
