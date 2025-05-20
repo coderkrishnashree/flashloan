@@ -31,10 +31,8 @@ async function main() {
   const QUICKSWAP_ROUTER = process.env.QUICKSWAP_ROUTER;
   const SUSHISWAP_ROUTER = process.env.SUSHISWAP_ROUTER;
 
-  // Update the provider
-  const provider = new ethers.providers.JsonRpcProvider(
-    `https://polygon-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`
-  );
+  // Update the provider to use the full RPC URL directly
+  const provider = new ethers.providers.JsonRpcProvider(process.env.POLYGON_MAINNET_RPC_URL);
   
   // Router ABI for price checks
   const routerAbi = [

@@ -1,12 +1,13 @@
 // hardhat.config.js
-require("@nomicfoundation/hardhat-toolbox");
+require("@nomiclabs/hardhat-ethers");
 require("dotenv").config();
+require("@nomicfoundation/hardhat-verify");
 
 module.exports = {
   solidity: {
     compilers: [
       {
-        version: "0.8.10",
+        version: "0.6.12",
         settings: {
           optimizer: {
             enabled: true,
@@ -17,26 +18,19 @@ module.exports = {
     ]
   },
   networks: {
-    hardhat: {
-      forking: {
-        url: `https://polygon-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`,
-        blockNumber: 42000000 // Use a stable block for Polygon
-      }
-    },
-    mumbai: {
-      url: `https://polygon-mumbai.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`,
+    amoy: {
+      url: process.env.POLYGON_AMOY_RPC_URL,
       accounts: [process.env.PRIVATE_KEY]
     },
     polygon: {
-      url: `https://polygon-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`,
+      url: process.env.POLYGON_MAINNET_RPC_URL,
       accounts: [process.env.PRIVATE_KEY]
     }
   },
   etherscan: {
-    // Your API key for Polygonscan
     apiKey: {
       polygon: process.env.POLYGONSCAN_API_KEY,
-      polygonMumbai: process.env.POLYGONSCAN_API_KEY,
+      amoy: process.env.POLYGONSCAN_API_KEY,
     },
   }
 };

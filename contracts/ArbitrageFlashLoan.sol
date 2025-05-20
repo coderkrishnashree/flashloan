@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.10;
+pragma solidity 0.6.12;
+pragma experimental ABIEncoderV2;
 
 import "@aave/protocol-v2/contracts/flashloan/base/FlashLoanReceiverBase.sol";
 import "@aave/protocol-v2/contracts/interfaces/ILendingPoolAddressesProvider.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 contract ArbitrageFlashLoan is FlashLoanReceiverBase, Ownable, ReentrancyGuard {
+    using SafeMath for uint256;
+
     // Addresses for Mainnet DEX Routers
     address private constant UNISWAP_ROUTER = 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D;
     address private constant SUSHISWAP_ROUTER = 0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F;
@@ -18,7 +20,10 @@ contract ArbitrageFlashLoan is FlashLoanReceiverBase, Ownable, ReentrancyGuard {
     // Events
     event ArbitrageExecuted(address indexed tokenBorrowed, uint256 amount, uint256 profit);
     
-    constructor(address _addressProvider) FlashLoanReceiverBase(ILendingPoolAddressesProvider(_addressProvider)) {}
+    constructor(address _addressProvider) 
+        FlashLoanReceiverBase(ILendingPoolAddressesProvider(_addressProvider)) 
+        public 
+    {}
     
     function executeFlashLoan(address _asset, uint256 _amount) external onlyOwner nonReentrant {
         address[] memory assets = new address[](1);
@@ -59,7 +64,7 @@ contract ArbitrageFlashLoan is FlashLoanReceiverBase, Ownable, ReentrancyGuard {
         address borrowedAsset = assets[0];
         uint256 borrowedAmount = amounts[0];
         uint256 fee = premiums[0];
-        uint256 amountOwing = borrowedAmount + fee;
+        uint256 amountOwing = borrowedAmount.add(fee);
         
         // Record initial balance to calculate profit
         uint256 initialBalance = IERC20(borrowedAsset).balanceOf(address(this));
@@ -77,7 +82,7 @@ contract ArbitrageFlashLoan is FlashLoanReceiverBase, Ownable, ReentrancyGuard {
         require(finalBalance >= amountOwing, "Insufficient funds to repay flash loan");
         
         // Check if we made enough profit
-        uint256 profit = finalBalance - amountOwing;
+        uint256 profit = finalBalance.sub(amountOwing);
         require(profit >= minProfitThreshold, "Profit below threshold");
         
         // Approve the LendingPool contract to pull the owed amount + fee

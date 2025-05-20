@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.10;
+pragma solidity 0.6.12;
+pragma experimental ABIEncoderV2;
 
 import "@aave/protocol-v2/contracts/flashloan/base/FlashLoanReceiverBase.sol";
 import "@aave/protocol-v2/contracts/interfaces/ILendingPoolAddressesProvider.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-// Interface for Uniswap V2 Router - We define it here for simplicity
+// Interface for Uniswap V2 Router
 interface IUniswapV2Router {
     function swapExactTokensForTokens(
         uint amountIn,
@@ -22,6 +22,8 @@ interface IUniswapV2Router {
 }
 
 contract AdvancedArbitrageBot is FlashLoanReceiverBase, Ownable, ReentrancyGuard {
+    using SafeMath for uint256;
+    
     // DEX Routers
     address public immutable uniswapRouter;
     address public immutable sushiswapRouter;
@@ -38,11 +40,18 @@ contract AdvancedArbitrageBot is FlashLoanReceiverBase, Ownable, ReentrancyGuard
     event ArbitrageExecuted(address indexed tokenBorrowed, uint256 amount, uint256 profit);
     event EmergencyWithdrawal(address token, uint256 amount);
     
+    // Strategy types
+    uint8 private constant STRATEGY_SIMPLE = 1;
+    uint8 private constant STRATEGY_MULTI_DEX = 2;
+    
     constructor(
         address _addressProvider,
         address _uniswapRouter,
         address _sushiswapRouter
-    ) FlashLoanReceiverBase(ILendingPoolAddressesProvider(_addressProvider)) {
+    ) 
+        FlashLoanReceiverBase(ILendingPoolAddressesProvider(_addressProvider)) 
+        public 
+    {
         uniswapRouter = _uniswapRouter;
         sushiswapRouter = _sushiswapRouter;
         minProfitThreshold = 0.1 ether; // 0.1 ETH worth of profit minimum
@@ -101,66 +110,73 @@ contract AdvancedArbitrageBot is FlashLoanReceiverBase, Ownable, ReentrancyGuard
         // Security check
         require(msg.sender == address(LENDING_POOL), "Invalid caller");
         
-        // Decode our strategy parameters
-        (
-            uint8 strategyType,
-            address[] memory path,
-            uint256[] memory minAmountsOut,
-            address[] memory routers
-        ) = abi.decode(params, (uint8, address[], uint256[], address[]));
-        
-        // Track initial balance to calculate profit
-        uint256 initialBalance = IERC20(assets[0]).balanceOf(address(this));
-        uint256 amountToRepay = amounts[0] + premiums[0];
+        // Extract borrowed asset and amount details first to reduce stack depth
+        address borrowedAsset = assets[0];
+        uint256 borrowedAmount = amounts[0];
+        uint256 amountToRepay = borrowedAmount.add(premiums[0]);
         
         // Record gas left to ensure we don't run out of gas
         uint256 gasStart = gasleft();
         
-        if (strategyType == 1) {
-            // Simple Uniswap -> Sushiswap arbitrage
-            _executeUniSwapStrategy(assets[0], amounts[0], path, minAmountsOut);
-        } else if (strategyType == 2) {
-            // Multi-DEX strategy (combine multiple exchanges)
-            _executeMultiDexStrategy(assets[0], amounts[0], path, routers, minAmountsOut);
-        }
+        // Execute strategy
+        _executeStrategy(borrowedAsset, borrowedAmount, params);
         
         // Check if we have enough gas left for the remaining operations
-        require(gasleft() > gasStart / 4, "Gas running low");
+        require(gasleft() > gasStart.div(4), "Gas running low");
         
         // Calculate profit
-        uint256 finalBalance = IERC20(assets[0]).balanceOf(address(this));
+        uint256 finalBalance = IERC20(borrowedAsset).balanceOf(address(this));
         require(finalBalance >= amountToRepay, "Insufficient funds to repay");
-        uint256 profit = finalBalance - amountToRepay;
+        uint256 profit = finalBalance.sub(amountToRepay);
         
         // Ensure profit meets minimum threshold
         require(profit >= minProfitThreshold, "Profit below threshold");
         
         // Approve repayment
-        IERC20(assets[0]).approve(address(LENDING_POOL), amountToRepay);
+        IERC20(borrowedAsset).approve(address(LENDING_POOL), amountToRepay);
         
         // Emit success event
-        emit ArbitrageExecuted(assets[0], amounts[0], profit);
+        emit ArbitrageExecuted(borrowedAsset, borrowedAmount, profit);
         
         return true;
     }
     
-    // Simple strategy that swaps tokens on Uniswap and back on Sushiswap
-    function _executeUniSwapStrategy(
-        address tokenIn,
-        uint256 amountIn,
-        address[] memory path,
-        uint256[] memory minAmountsOut
+    // Handle strategy execution to reduce stack depth
+    function _executeStrategy(
+        address borrowedAsset,
+        uint256 borrowedAmount,
+        bytes calldata params
     ) internal {
+        // Decode strategy type first
+        (uint8 strategyType,,) = abi.decode(params, (uint8, address[], uint256[]));
+        
+        if (strategyType == STRATEGY_SIMPLE) {
+            _executeSimpleStrategy(borrowedAsset, borrowedAmount, params);
+        } else if (strategyType == STRATEGY_MULTI_DEX) {
+            _executeMultiStrategy(borrowedAsset, borrowedAmount, params);
+        }
+    }
+    
+    // Simple strategy execution
+    function _executeSimpleStrategy(
+        address borrowedAsset,
+        uint256 borrowedAmount,
+        bytes calldata params
+    ) internal {
+        // Split the decoding to avoid stack too deep
+        (, address[] memory path, uint256[] memory minAmountsOut) = 
+            abi.decode(params, (uint8, address[], uint256[]));
+        
         // Approve Uniswap router
-        IERC20(tokenIn).approve(uniswapRouter, amountIn);
+        IERC20(borrowedAsset).approve(uniswapRouter, borrowedAmount);
         
         // Swap on Uniswap
         IUniswapV2Router(uniswapRouter).swapExactTokensForTokens(
-            amountIn,
+            borrowedAmount,
             minAmountsOut[0], 
             path,
             address(this),
-            block.timestamp + 300
+            block.timestamp.add(300)
         );
         
         // Approve Sushiswap router
@@ -179,20 +195,89 @@ contract AdvancedArbitrageBot is FlashLoanReceiverBase, Ownable, ReentrancyGuard
             minAmountsOut[1],
             reversePath,
             address(this),
-            block.timestamp + 300
+            block.timestamp.add(300)
         );
     }
     
-    // Multi-DEX strategy that splits trades across different exchanges
-    function _executeMultiDexStrategy(
-        address tokenIn,
-        uint256 amountIn,
-        address[] memory path,
-        address[] memory routers,
-        uint256[] memory minAmountsOut
+    // Multi-DEX strategy execution
+    function _executeMultiStrategy(
+        address borrowedAsset,
+        uint256 borrowedAmount,
+        bytes calldata params
     ) internal {
-        // Implementation for multi-DEX strategy would go here
-        // This is a placeholder for the full implementation
+        // Split the decoding to avoid stack too deep
+        (, address[] memory path, uint256[] memory minAmountsOut) = 
+            abi.decode(params, (uint8, address[], uint256[]));
+            
+        // Get routers from another field
+        (,,, address[] memory routers) = 
+            abi.decode(params, (uint8, address[], uint256[], address[]));
+        
+        require(path.length >= 3, "Path too short for multi-dex strategy");
+        require(routers.length >= 2, "Not enough routers provided");
+        
+        // Calculate optimal split for the first trade
+        uint256 firstPortionAmount = borrowedAmount.mul(70).div(100);
+        uint256 secondPortionAmount = borrowedAmount.sub(firstPortionAmount);
+        
+        // Create sub-paths
+        address[] memory firstHopPath = new address[](2);
+        firstHopPath[0] = path[0];
+        firstHopPath[1] = path[1];
+        
+        // Approve first router
+        IERC20(borrowedAsset).approve(routers[0], firstPortionAmount);
+        
+        // Execute first part of trade on first router
+        IUniswapV2Router(routers[0]).swapExactTokensForTokens(
+            firstPortionAmount,
+            minAmountsOut[0],
+            firstHopPath,
+            address(this),
+            block.timestamp.add(300)
+        );
+        
+        // Approve second router
+        IERC20(borrowedAsset).approve(routers[1], secondPortionAmount);
+        
+        // Execute second part of trade on second router
+        IUniswapV2Router(routers[1]).swapExactTokensForTokens(
+            secondPortionAmount,
+            minAmountsOut[1],
+            firstHopPath,
+            address(this),
+            block.timestamp.add(300)
+        );
+        
+        _executeSecondHop(path, minAmountsOut, routers);
+    }
+    
+    // Split the second hop to avoid stack too deep
+    function _executeSecondHop(
+        address[] memory path,
+        uint256[] memory minAmountsOut,
+        address[] memory routers
+    ) internal {
+        // Create second hop path
+        address[] memory secondHopPath = new address[](2);
+        secondHopPath[0] = path[1]; 
+        secondHopPath[1] = path[2];
+        
+        // Get intermediate token balance
+        address intermediateToken = path[1];
+        uint256 intermediateAmount = IERC20(intermediateToken).balanceOf(address(this));
+        
+        // Approve for final swap (use the first router for simplicity)
+        IERC20(intermediateToken).approve(routers[0], intermediateAmount);
+        
+        // Execute final swap back to original token
+        IUniswapV2Router(routers[0]).swapExactTokensForTokens(
+            intermediateAmount,
+            minAmountsOut[2],
+            secondHopPath,
+            address(this),
+            block.timestamp.add(300)
+        );
     }
     
     // Emergency functions
@@ -219,73 +304,6 @@ contract AdvancedArbitrageBot is FlashLoanReceiverBase, Ownable, ReentrancyGuard
     function setAuthorizedCaller(address _caller, bool _status) external onlyOwner {
         authorizedCallers[_caller] = _status;
     }
-
-    // Multi-DEX strategy that splits trades across different exchanges
-function _executeMultiDexStrategy(
-    address tokenIn,
-    uint256 amountIn,
-    address[] memory path,
-    address[] memory routers,
-    uint256[] memory minAmountsOut
-) internal {
-    require(path.length >= 3, "Path too short for multi-dex strategy");
-    require(routers.length >= 2, "Not enough routers provided");
-    
-    // Calculate optimal split for the first trade
-    // For simplicity, we'll use a 70/30 split, but in production,
-    // you would calculate this based on liquidity depths
-    uint256 firstPortionAmount = amountIn * 70 / 100;
-    uint256 secondPortionAmount = amountIn - firstPortionAmount;
-    
-    // Create sub-paths
-    address[] memory firstHopPath = new address[](2);
-    firstHopPath[0] = path[0];
-    firstHopPath[1] = path[1];
-    
-    address[] memory secondHopPath = new address[](2);
-    secondHopPath[0] = path[1]; 
-    secondHopPath[1] = path[2];
-    
-    // Approve first router
-    IERC20(tokenIn).approve(routers[0], firstPortionAmount);
-    
-    // Execute first part of trade on first router
-    IUniswapV2Router(routers[0]).swapExactTokensForTokens(
-        firstPortionAmount,
-        minAmountsOut[0],
-        firstHopPath,
-        address(this),
-        block.timestamp + 300
-    );
-    
-    // Approve second router
-    IERC20(tokenIn).approve(routers[1], secondPortionAmount);
-    
-    // Execute second part of trade on second router
-    IUniswapV2Router(routers[1]).swapExactTokensForTokens(
-        secondPortionAmount,
-        minAmountsOut[1],
-        firstHopPath,
-        address(this),
-        block.timestamp + 300
-    );
-    
-    // Get intermediate token balance
-    address intermediateToken = path[1];
-    uint256 intermediateAmount = IERC20(intermediateToken).balanceOf(address(this));
-    
-    // Approve for final swap (use the first router for simplicity)
-    IERC20(intermediateToken).approve(routers[0], intermediateAmount);
-    
-    // Execute final swap back to original token
-    IUniswapV2Router(routers[0]).swapExactTokensForTokens(
-        intermediateAmount,
-        minAmountsOut[2],
-        secondHopPath,
-        address(this),
-        block.timestamp + 300
-    );
-}
     
     // Function to receive ETH
     receive() external payable {}
