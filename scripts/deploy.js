@@ -18,8 +18,8 @@ async function main() {
     const AdvancedArbitrageBot = await ethers.getContractFactory("AdvancedArbitrageBot");
     const advancedBot = await AdvancedArbitrageBot.deploy(
       process.env.AAVE_LENDING_POOL_ADDRESS_PROVIDER,
-      "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D", // Uniswap V2 Router
-      "0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F"  // Sushiswap Router
+      "0xa5E0829CaCEd8fFDD4De3c43696c57F7D7A678ff", // Uniswap V2 Router
+      "0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506"  // Sushiswap Router
     );
     await advancedBot.deployed();
     console.log("Advanced ArbitrageBot deployed to:", advancedBot.address);

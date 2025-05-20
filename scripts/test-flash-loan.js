@@ -6,9 +6,9 @@ async function main() {
   // Get the deployed contract
   const arbitrageFlashLoan = await ethers.getContract("ArbitrageFlashLoan");
   
-  // Define test parameters
-  const DAI = "0x6B175474E89094C44Da98b954EedeAC495271d0F"; // DAI address on mainnet
-  const amountToLoan = ethers.utils.parseEther("1000"); // 1000 DAI
+// Define test parameters
+const DAI = "0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063"; // DAI address on Polygon
+const amountToLoan = ethers.utils.parseEther("1000"); // 1000 DAI
   
   // Execute a flash loan
   try {

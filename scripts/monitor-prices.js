@@ -2,26 +2,28 @@ const { ethers } = require("ethers");
 require("dotenv").config();
 
 async function main() {
-  // Setup provider
-  const provider = new ethers.providers.JsonRpcProvider(`https://mainnet.infura.io/v3/${process.env.INFURA_API_KEY}`);
-  
-  // Define token pairs to monitor
-  const tokenPairs = [
-    {
-      token0: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", // WETH
-      token1: "0x6B175474E89094C44Da98b954EedeAC495271d0F", // DAI
-      name: "WETH/DAI"
-    },
-    {
-      token0: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", // WETH
-      token1: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", // USDC
-      name: "WETH/USDC"
-    }
-  ];
-  
-  // Router addresses
-  const UNISWAP_ROUTER = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D";
-  const SUSHISWAP_ROUTER = "0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F";
+// Define token pairs to monitor
+const tokenPairs = [
+  {
+    token0: "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270", // WMATIC
+    token1: "0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063", // DAI on Polygon
+    name: "WMATIC/DAI"
+  },
+  {
+    token0: "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270", // WMATIC
+    token1: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174", // USDC on Polygon
+    name: "WMATIC/USDC"
+  }
+];
+
+// Router addresses
+const QUICKSWAP_ROUTER = "0xa5E0829CaCEd8fFDD4De3c43696c57F7D7A678ff";
+const SUSHISWAP_ROUTER = "0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506";
+
+// Update the provider
+const provider = new ethers.providers.JsonRpcProvider(
+  `https://polygon-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`
+);
   
   // Router ABI for price checks
   const routerAbi = [
